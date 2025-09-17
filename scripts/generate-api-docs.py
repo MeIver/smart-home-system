@@ -1,231 +1,220 @@
 #!/usr/bin/env python3
 """
-Smart Home System API Documentation Generator
+API Documentation Generator for Smart Home System
 
-This script generates API documentation from templates and validates the output.
+This script generates API documentation from templates and validates the format.
+It supports automatic documentation generation with error detection and reporting.
 """
 
 import os
-import sys
+import re
 import json
 import yaml
 import argparse
-import datetime
+import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from datetime import datetime
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-def load_template(template_path: str) -> str:
-    """Load the API documentation template."""
-    try:
-        with open(template_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        print(f"Error: Template file not found at {template_path}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error reading template: {e}")
-        sys.exit(1)
-
-
-def validate_template_content(template_content: str) -> bool:
-    """Validate that the template contains all required sections."""
-    required_sections = [
-        "## Overview",
-        "## Authentication", 
-        "## Endpoints",
-        "## Request/Response Examples",
-        "## Error Codes"
-    ]
+class APIDocsGenerator:
+    """API Documentation Generator class"""
     
-    missing_sections = []
-    for section in required_sections:
-        if section not in template_content:
-            missing_sections.append(section)
+    def __init__(self, template_dir: str = "docs/templates", output_dir: str = "docs/api"):
+        self.template_dir = Path(template_dir)
+        self.output_dir = Path(output_dir)
+        self.template_file = self.template_dir / "api-docs-template.md"
+        self.output_file = self.output_dir / "endpoints.md"
+        
+        # Ensure directories exist
+        self.template_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
     
-    if missing_sections:
-        print(f"Error: Template missing required sections: {missing_sections}")
-        return False
-    
-    return True
-
-
-def generate_api_docs(template_content: str, output_path: str, metadata: Optional[Dict] = None) -> bool:
-    """Generate API documentation from template."""
-    try:
-        # Add metadata if provided
-        content = template_content
-        if metadata:
-            metadata_section = f"\n<!-- Generated: {datetime.datetime.now().isoformat()} -->\n"
-            metadata_section += f"<!-- Version: {metadata.get('version', '1.0.0')} -->\n"
-            content = content.replace("# Smart Home System API Documentation", 
-                                    f"# Smart Home System API Documentation{metadata_section}")
-        
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        
-        print(f"API documentation generated successfully: {output_path}")
-        return True
-        
-    except Exception as e:
-        print(f"Error generating documentation: {e}")
-        return False
-
-
-def validate_generated_docs(docs_path: str) -> Dict[str, Any]:
-    """Validate the generated API documentation."""
-    validation_results = {
-        'has_overview': False,
-        'has_authentication': False,
-        'has_endpoints': False,
-        'has_examples': False,
-        'has_error_codes': False,
-        'has_http_examples': False,
-        'has_json_examples': False,
-        'line_count': 0,
-        'word_count': 0,
-        'validation_passed': False
-    }
-    
-    try:
-        with open(docs_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            
-        # Basic validation
-        validation_results['has_overview'] = '## Overview' in content
-        validation_results['has_authentication'] = '## Authentication' in content
-        validation_results['has_endpoints'] = '## Endpoints' in content
-        validation_results['has_examples'] = '## Request/Response Examples' in content
-        validation_results['has_error_codes'] = '## Error Codes' in content
-        validation_results['has_http_examples'] = '```http' in content
-        validation_results['has_json_examples'] = '```json' in content
-        
-        # Count metrics
-        validation_results['line_count'] = len(content.split('\n'))
-        validation_results['word_count'] = len(content.split())
-        
-        # Check if all required sections are present
-        required_checks = [
-            validation_results['has_overview'],
-            validation_results['has_authentication'],
-            validation_results['has_endpoints'], 
-            validation_results['has_examples'],
-            validation_results['has_error_codes'],
-            validation_results['has_http_examples'],
-            validation_results['has_json_examples']
-        ]
-        
-        validation_results['validation_passed'] = all(required_checks)
-        
-        return validation_results
-        
-    except Exception as e:
-        print(f"Error validating documentation: {e}")
-        validation_results['error'] = str(e)
-        return validation_results
-
-
-def generate_validation_report(validation_results: Dict[str, Any], report_path: str) -> bool:
-    """Generate a validation report in JSON format."""
-    try:
-        report_data = {
-            'timestamp': datetime.datetime.now().isoformat(),
-            'validation_results': validation_results,
-            'summary': {
-                'passed': validation_results['validation_passed'],
-                'total_checks': 7,
-                'passed_checks': sum([
-                    1 for check in [
-                        validation_results['has_overview'],
-                        validation_results['has_authentication'],
-                        validation_results['has_endpoints'],
-                        validation_results['has_examples'],
-                        validation_results['has_error_codes'],
-                        validation_results['has_http_examples'],
-                        validation_results['has_json_examples']
-                    ] if check
-                ])
-            }
+    def validate_template(self) -> Dict[str, Any]:
+        """Validate the API documentation template"""
+        validation_results = {
+            "valid": True,
+            "errors": [],
+            "warnings": [],
+            "sections_found": []
         }
         
-        os.makedirs(os.path.dirname(report_path), exist_ok=True)
+        if not self.template_file.exists():
+            validation_results["valid"] = False
+            validation_results["errors"].append(f"Template file not found: {self.template_file}")
+            return validation_results
         
-        with open(report_path, 'w', encoding='utf-8') as f:
-            json.dump(report_data, f, indent=2, ensure_ascii=False)
+        try:
+            content = self.template_file.read_text(encoding='utf-8')
+            
+            # Check for required sections
+            required_sections = [
+                "Overview",
+                "Authentication", 
+                "Endpoints",
+                "Request/Response Examples",
+                "Error Codes"
+            ]
+            
+            for section in required_sections:
+                if f"## {section}" in content:
+                    validation_results["sections_found"].append(section)
+                else:
+                    validation_results["valid"] = False
+                    validation_results["errors"].append(f"Missing required section: {section}")
+            
+            # Validate HTTP examples
+            http_examples = re.findall(r'```http\n(.*?)\n```', content, re.DOTALL)
+            if not http_examples:
+                validation_results["warnings"].append("No HTTP examples found in template")
+            
+            # Validate JSON examples
+            json_examples = re.findall(r'```json\n(.*?)\n```', content, re.DOTALL)
+            for json_example in json_examples:
+                try:
+                    json.loads(json_example)
+                except json.JSONDecodeError as e:
+                    validation_results["warnings"].append(f"Invalid JSON in example: {str(e)}")
+            
+            # Check for code blocks
+            code_blocks = re.findall(r'```(?:http|json|bash|python)\n(.*?)\n```', content, re.DOTALL)
+            if len(code_blocks) < 5:
+                validation_results["warnings"].append("Few code examples found - consider adding more")
+            
+            # Check table formatting
+            tables = re.findall(r'\|.*?\|.*?\|', content)
+            if not tables:
+                validation_results["warnings"].append("No tables found - consider adding tables for error codes or parameters")
+            
+        except Exception as e:
+            validation_results["valid"] = False
+            validation_results["errors"].append(f"Error reading template: {str(e)}")
         
-        print(f"Validation report generated: {report_path}")
-        return True
+        return validation_results
+    
+    def generate_documentation(self, validate: bool = True) -> Dict[str, Any]:
+        """Generate API documentation from template"""
+        result = {
+            "success": False,
+            "message": "",
+            "validation": {},
+            "output_file": str(self.output_file)
+        }
         
-    except Exception as e:
-        print(f"Error generating validation report: {e}")
-        return False
-
+        if validate:
+            validation = self.validate_template()
+            result["validation"] = validation
+            
+            if not validation["valid"]:
+                result["message"] = "Template validation failed"
+                return result
+        
+        try:
+            if not self.template_file.exists():
+                result["message"] = f"Template file not found: {self.template_file}"
+                return result
+            
+            # Read template content
+            content = self.template_file.read_text(encoding='utf-8')
+            
+            # Add generation metadata
+            generation_info = f"\n\n---\n\n*Generated on {datetime.now().isoformat()} by API Documentation Generator*"
+            content += generation_info
+            
+            # Write to output file
+            self.output_file.write_text(content, encoding='utf-8')
+            
+            result["success"] = True
+            result["message"] = f"API documentation generated successfully: {self.output_file}"
+            
+            # Generate validation report
+            self._generate_validation_report(validation)
+            
+        except Exception as e:
+            result["message"] = f"Error generating documentation: {str(e)}"
+            logger.error(f"Generation error: {e}")
+        
+        return result
+    
+    def _generate_validation_report(self, validation: Dict[str, Any]) -> None:
+        """Generate a validation report file"""
+        report_file = self.output_dir / "validation-report.json"
+        
+        report_data = {
+            "timestamp": datetime.now().isoformat(),
+            "template_file": str(self.template_file),
+            "output_file": str(self.output_file),
+            "valid": validation["valid"],
+            "errors": validation["errors"],
+            "warnings": validation["warnings"],
+            "sections_found": validation["sections_found"]
+        }
+        
+        try:
+            report_file.write_text(json.dumps(report_data, indent=2), encoding='utf-8')
+            logger.info(f"Validation report generated: {report_file}")
+        except Exception as e:
+            logger.error(f"Error generating validation report: {e}")
+    
+    def check_health(self) -> Dict[str, Any]:
+        """Check the health of the documentation system"""
+        health = {
+            "healthy": True,
+            "issues": [],
+            "template_exists": self.template_file.exists(),
+            "output_dir_exists": self.output_dir.exists(),
+            "template_dir_exists": self.template_dir.exists()
+        }
+        
+        if not health["template_dir_exists"]:
+            health["healthy"] = False
+            health["issues"].append("Template directory does not exist")
+        
+        if not health["output_dir_exists"]:
+            health["healthy"] = False
+            health["issues"].append("Output directory does not exist")
+        
+        if not health["template_exists"]:
+            health["healthy"] = False
+            health["issues"].append("Template file does not exist")
+        
+        return health
 
 def main():
-    """Main function to generate and validate API documentation."""
-    parser = argparse.ArgumentParser(description='Generate API documentation from template')
-    parser.add_argument('--template', '-t', default='docs/templates/api-docs-template.md', 
-                       help='Path to template file')
-    parser.add_argument('--output', '-o', default='docs/api/endpoints.md', 
-                       help='Output path for generated documentation')
-    parser.add_argument('--report', '-r', default='reports/api-docs-validation.json', 
-                       help='Path for validation report')
-    parser.add_argument('--validate-only', action='store_true', 
-                       help='Only validate existing documentation without generating')
+    """Main function"""
+    parser = argparse.ArgumentParser(description="Generate API documentation from templates")
+    parser.add_argument("--validate", action="store_true", help="Validate template only")
+    parser.add_argument("--generate", action="store_true", help="Generate documentation")
+    parser.add_argument("--health", action="store_true", help="Check system health")
+    parser.add_argument("--template-dir", default="docs/templates", help="Template directory")
+    parser.add_argument("--output-dir", default="docs/api", help="Output directory")
     
     args = parser.parse_args()
     
-    if not args.validate_only:
-        # Generate documentation
-        print("Loading template...")
-        template_content = load_template(args.template)
-        
-        print("Validating template content...")
-        if not validate_template_content(template_content):
-            sys.exit(1)
-        
-        print("Generating API documentation...")
-        metadata = {
-            'version': '1.0.0',
-            'generated_at': datetime.datetime.now().isoformat(),
-            'template_version': '1.0'
-        }
-        
-        if not generate_api_docs(template_content, args.output, metadata):
-            sys.exit(1)
+    generator = APIDocsGenerator(args.template_dir, args.output_dir)
     
-    # Validate generated documentation
-    print("Validating generated documentation...")
-    validation_results = validate_generated_docs(args.output)
+    if args.health:
+        health = generator.check_health()
+        print(json.dumps(health, indent=2))
+        return 0 if health["healthy"] else 1
     
-    # Generate validation report
-    print("Generating validation report...")
-    if not generate_validation_report(validation_results, args.report):
-        sys.exit(1)
+    if args.validate:
+        validation = generator.validate_template()
+        print(json.dumps(validation, indent=2))
+        return 0 if validation["valid"] else 1
     
-    # Print summary
-    print(f"\n=== VALIDATION SUMMARY ===")
-    print(f"Overview Section: {'✓' if validation_results['has_overview'] else '✗'}")
-    print(f"Authentication Section: {'✓' if validation_results['has_authentication'] else '✗'}")
-    print(f"Endpoints Section: {'✓' if validation_results['has_endpoints'] else '✗'}")
-    print(f"Examples Section: {'✓' if validation_results['has_examples'] else '✗'}")
-    print(f"Error Codes Section: {'✓' if validation_results['has_error_codes'] else '✗'}")
-    print(f"HTTP Examples: {'✓' if validation_results['has_http_examples'] else '✗'}")
-    print(f"JSON Examples: {'✓' if validation_results['has_json_examples'] else '✗'}")
-    print(f"Line Count: {validation_results['line_count']}")
-    print(f"Word Count: {validation_results['word_count']}")
-    print(f"Overall Validation: {'PASSED' if validation_results['validation_passed'] else 'FAILED'}")
+    if args.generate:
+        result = generator.generate_documentation()
+        print(json.dumps(result, indent=2))
+        return 0 if result["success"] else 1
     
-    if not validation_results['validation_passed']:
-        print("\n❌ Documentation validation failed!")
-        sys.exit(1)
-    else:
-        print("\n✅ Documentation validation passed!")
-        sys.exit(0)
-
+    # Default action: generate with validation
+    result = generator.generate_documentation()
+    print(json.dumps(result, indent=2))
+    return 0 if result["success"] else 1
 
 if __name__ == "__main__":
-    main()
+    exit(main())
