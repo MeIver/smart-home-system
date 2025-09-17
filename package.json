@@ -1,0 +1,38 @@
+{
+    "name": "smart-medical-system",
+    "version": "1.0.0",
+    "description": "A smart medical system with automated API documentation generation",
+    "main": "src/index.js",
+    "scripts": {
+      "lint": "eslint src/**/*.js",
+      "test": "jest",
+      "build": "mkdir -p dist && cp -r src/* dist/",
+      "api-docs": "python scripts/generate-api-docs.py",
+      "start": "node src/index.js"
+    },
+    "devDependencies": {
+      "eslint": "^8.0.0",
+      "jest": "^29.0.0"
+    },
+    "jest": {
+      "testEnvironment": "node",
+      "testMatch": ["**/tests/**/*.test.js"]
+    },
+    "eslintConfig": {
+      "env": {
+        "browser": true,
+        "es2021": true,
+        "node": true
+      },
+      "extends": "eslint:recommended",
+      "parserOptions": {
+        "ecmaVersion": "latest",
+        "sourceType": "module"
+      },
+      "rules": {
+        "no-unused-vars": "error",
+        "no-console": "warn",
+        "semi": ["error", "always"]
+      }
+    }
+}
