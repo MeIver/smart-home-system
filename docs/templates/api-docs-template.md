@@ -2,37 +2,42 @@
 
 ## Overview
 
-The Smart Home System API provides a comprehensive interface for managing and controlling smart home devices, including lights, thermostats, security systems, and more. This RESTful API enables developers to integrate smart home functionality into their applications.
+The Smart Home System API provides a comprehensive interface for managing and controlling smart home devices, including lights, thermostats, security systems, and more. This RESTful API allows developers to integrate with the smart home ecosystem and build applications that can monitor and control home automation devices.
 
 **Base URL**: `https://api.smart-home-system.com/v1`
+**Content Type**: `application/json`
 
 ## Authentication
 
-All API requests require authentication using JSON Web Tokens (JWT). Include the token in the Authorization header:
+All API requests require authentication using Bearer tokens. Include the token in the Authorization header of your requests.
 
+### Authentication Header
 ```http
-Authorization: Bearer <your_jwt_token>
+Authorization: Bearer YOUR_ACCESS_TOKEN
 ```
 
-### Obtaining a Token
+### Obtaining an Access Token
 
-```http
-POST /auth/login
-Content-Type: application/json
+1. **User Login**
+   ```http
+   POST /auth/login
+   Content-Type: application/json
+   
+   {
+     "username": "your_username",
+     "password": "your_password"
+   }
+   ```
 
-{
-  "username": "your_username",
-  "password": "your_password"
-}
-```
-
-Response:
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expires_in": 3600
-}
-```
+2. **API Key Authentication**
+   ```http
+   POST /auth/api-key
+   Content-Type: application/json
+   
+   {
+     "api_key": "your_api_key"
+   }
+   ```
 
 ## Endpoints
 
@@ -43,7 +48,7 @@ Response:
 GET /devices
 ```
 
-**Response:**
+**Response**
 ```json
 {
   "devices": [
@@ -51,10 +56,15 @@ GET /devices
       "id": "device_123",
       "name": "Living Room Light",
       "type": "light",
-      "status": "on",
-      "location": "living_room"
+      "status": "online",
+      "room": "living_room",
+      "manufacturer": "Philips Hue",
+      "capabilities": ["on_off", "brightness", "color"]
     }
-  ]
+  ],
+  "total_count": 15,
+  "page": 1,
+  "per_page": 20
 }
 ```
 
@@ -62,6 +72,9 @@ GET /devices
 ```http
 GET /devices/{device_id}
 ```
+
+**Parameters**
+- `device_id` (string, required): The unique identifier of the device
 
 #### Control Device
 ```http
@@ -71,7 +84,8 @@ Content-Type: application/json
 {
   "action": "turn_on",
   "parameters": {
-    "brightness": 75
+    "brightness": 75,
+    "color": "#FF5733"
   }
 }
 ```
@@ -83,20 +97,9 @@ Content-Type: application/json
 GET /rooms
 ```
 
-#### Get Room by ID
+#### Get Room Devices
 ```http
-GET /rooms/{room_id}
-```
-
-#### Create Room
-```http
-POST /rooms
-Content-Type: application/json
-
-{
-  "name": "Bedroom",
-  "description": "Main bedroom"
-}
+GET /rooms/{room_id}/devices
 ```
 
 ### Scenes
@@ -106,25 +109,9 @@ Content-Type: application/json
 GET /scenes
 ```
 
-#### Execute Scene
+#### Activate Scene
 ```http
-POST /scenes/{scene_id}/execute
-```
-
-#### Create Scene
-```http
-POST /scenes
-Content-Type: application/json
-
-{
-  "name": "Movie Night",
-  "actions": [
-    {
-      "device_id": "light_1",
-      "action": "turn_off"
-    }
-  ]
-}
+POST /scenes/{scene_id}/activate
 ```
 
 ### Schedules
@@ -141,39 +128,45 @@ Content-Type: application/json
 
 {
   "name": "Morning Routine",
+  "description": "Turn on lights and adjust thermostat in the morning",
   "cron_expression": "0 7 * * *",
   "actions": [
     {
-      "device_id": "thermostat_1",
-      "action": "set_temperature",
+      "device_id": "light_123",
+      "action": "turn_on",
       "parameters": {
-        "temperature": 22
+        "brightness": 50
       }
     }
-  ]
+  ],
+  "enabled": true
 }
 ```
 
 ## Request/Response Examples
 
-### Example 1: Turn on a light
+### Example: Turning on a light
 
-**Request:**
+**Request**
 ```http
 POST /devices/light_123/control
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Authorization: Bearer abc123def456
 Content-Type: application/json
 
 {
   "action": "turn_on",
   "parameters": {
-    "brightness": 80
+    "brightness": 80,
+    "color": "warm_white"
   }
 }
 ```
 
-**Response:**
-```json
+**Response**
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
 {
   "success": true,
   "message": "Device light_123 turned on successfully",
@@ -181,91 +174,142 @@ Content-Type: application/json
     "id": "light_123",
     "name": "Living Room Light",
     "status": "on",
-    "brightness": 80
+    "brightness": 80,
+    "color": "warm_white"
   }
 }
 ```
 
-### Example 2: Get device status
+### Example: Getting device list
 
-**Request:**
+**Request**
 ```http
-GET /devices/light_123
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+GET /devices?room=living_room&type=light
+Authorization: Bearer abc123def456
 ```
 
-**Response:**
-```json
+**Response**
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
 {
-  "id": "light_123",
-  "name": "Living Room Light",
-  "type": "light",
-  "status": "on",
-  "brightness": 80,
-  "location": "living_room",
-  "last_updated": "2024-01-15T10:30:00Z"
+  "devices": [
+    {
+      "id": "light_123",
+      "name": "Main Light",
+      "type": "light",
+      "status": "online",
+      "room": "living_room",
+      "capabilities": ["on_off", "brightness", "color"]
+    },
+    {
+      "id": "light_456",
+      "name": "Lamp",
+      "type": "light",
+      "status": "offline",
+      "room": "living_room",
+      "capabilities": ["on_off", "brightness"]
+    }
+  ],
+  "total_count": 2,
+  "page": 1,
+  "per_page": 20
 }
 ```
 
 ## Error Codes
 
-| HTTP Status | Error Code | Description |
-|-------------|------------|-------------|
-| 400 | BAD_REQUEST | Invalid request parameters |
-| 401 | UNAUTHORIZED | Authentication required or invalid token |
-| 403 | FORBIDDEN | Insufficient permissions |
-| 404 | NOT_FOUND | Resource not found |
-| 409 | CONFLICT | Resource conflict |
-| 422 | UNPROCESSABLE_ENTITY | Validation failed |
-| 429 | TOO_MANY_REQUESTS | Rate limit exceeded |
-| 500 | INTERNAL_ERROR | Server error |
-| 503 | SERVICE_UNAVAILABLE | Service temporarily unavailable |
+### HTTP Status Codes
+
+| Code | Description |
+|------|-------------|
+| 200 | Success |
+| 201 | Created |
+| 400 | Bad Request - Invalid parameters |
+| 401 | Unauthorized - Invalid or missing authentication |
+| 403 | Forbidden - Insufficient permissions |
+| 404 | Not Found - Resource not found |
+| 429 | Too Many Requests - Rate limit exceeded |
+| 500 | Internal Server Error |
+| 503 | Service Unavailable |
 
 ### Error Response Format
 
 ```json
 {
   "error": {
-    "code": "NOT_FOUND",
-    "message": "Device not found",
-    "details": "The requested device with ID 'invalid_id' does not exist"
+    "code": "device_not_found",
+    "message": "The requested device was not found",
+    "details": "Device with ID 'invalid_id' does not exist",
+    "timestamp": "2024-01-15T10:30:00Z",
+    "request_id": "req_abc123def456"
   }
 }
 ```
 
-## Rate Limits
+### Common Error Codes
 
-- **Standard**: 1000 requests per hour
-- **Burst**: 100 requests per minute
-- **Authentication**: 10 login attempts per minute
+- `invalid_token` - Authentication token is invalid or expired
+- `device_offline` - Requested device is currently offline
+- `invalid_parameters` - Request parameters are invalid
+- `rate_limit_exceeded` - Too many requests in a short period
+- `device_busy` - Device is currently processing another command
+- `unsupported_operation` - Requested operation is not supported by the device
+
+## Rate Limiting
+
+The API enforces rate limits to ensure fair usage:
+- **Standard users**: 100 requests per minute
+- **Premium users**: 1000 requests per minute
+- **Enterprise users**: Custom limits
+
+Rate limit headers are included in all responses:
+```http
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 95
+X-RateLimit-Reset: 1642253400
+```
 
 ## Pagination
 
-For endpoints returning lists, use query parameters:
-- `page`: Page number (default: 1)
-- `limit`: Items per page (default: 20, max: 100)
+List endpoints support pagination using `page` and `per_page` parameters:
 
-**Example:**
 ```http
-GET /devices?page=2&limit=50
+GET /devices?page=2&per_page=10
+```
+
+Response includes pagination metadata:
+```json
+{
+  "devices": [...],
+  "total_count": 150,
+  "page": 2,
+  "per_page": 10,
+  "total_pages": 15
+}
 ```
 
 ## Webhooks
 
-The API supports webhooks for real-time notifications. Register webhook endpoints to receive events:
+The API supports webhooks for real-time device status updates:
 
-- `DEVICE_STATE_CHANGED`
-- `SCENE_EXECUTED`
-- `SCHEDULE_TRIGGERED`
-- `SECURITY_ALERT`
+### Webhook Events
+- `device.status_changed` - Device status changed
+- `device.value_changed` - Device value updated
+- `scene.activated` - Scene activated
+- `schedule.triggered` - Schedule executed
 
-## Versioning
-
-API version is specified in the URL path. Current version: `v1`
-
-## Support
-
-For API support and questions:
-- Documentation: https://docs.smart-home-system.com
-- Support Email: api-support@smart-home-system.com
-- Community Forum: https://community.smart-home-system.com
+### Webhook Payload Example
+```json
+{
+  "event": "device.status_changed",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "data": {
+    "device_id": "light_123",
+    "old_status": "off",
+    "new_status": "on",
+    "brightness": 75
+  }
+}
+```
