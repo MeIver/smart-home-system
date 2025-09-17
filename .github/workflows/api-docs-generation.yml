@@ -1,0 +1,215 @@
+name: API Documentation Generation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'docs/templates/**'
+      - 'scripts/**'
+      - '.github/workflows/api-docs-generation.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/templates/**'
+      - 'scripts/**'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Run every Sunday at midnight
+
+jobs:
+  generate-api-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyyaml
+
+    - name: Generate API documentation
+      run: |
+        python scripts/generate-api-docs.py \
+          --template docs/templates/api-docs-template.md \
+          --output docs/api/endpoints.md \
+          --report reports/api-docs-validation.json
+
+    - name: Upload validation report
+      uses: actions/upload-artifact@v4
+      with:
+        name: api-docs-validation-report
+        path: reports/api-docs-validation.json
+
+    - name: Upload generated documentation
+      uses: actions/upload-artifact@v4
+      with:
+        name: generated-api-docs
+        path: docs/api/endpoints.md
+
+    - name: Check validation status
+      id: validation
+      run: |
+        if python scripts/generate-api-docs.py --validate-only; then
+          echo "validation_passed=true" >> $GITHUB_OUTPUT
+        else
+          echo "validation_passed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create validation summary
+      if: always()
+      run: |
+        if [ -f "reports/api-docs-validation.json" ]; then
+          echo "### API Documentation Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          VALIDATION_DATA=$(cat reports/api-docs-validation.json)
+          
+          echo "📊 **Validation Results:**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Overview Section | $(echo $VALIDATION_DATA | jq -r '.validation_results.has_overview | if . then "✅" else "❌" end') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Authentication Section | $(echo $VALIDATION_DATA | jq -r '.validation_results.has_authentication | if . then "✅" else "❌" end') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Endpoints Section | $(echo $VALIDATION_DATA | jq -r '.validation_results.has_endpoints | if . then "✅" else "❌" end') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Examples Section | $(echo $VALIDATION_DATA | jq -r '.validation_results.has_examples | if . then "✅" else "❌" end') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Error Codes Section | $(echo $VALIDATION_DATA | jq -r '.validation_results.has_error_codes | if . then "✅" else "❌" end') |" >> $GITHUB_STEP_SUMMARY
+          echo "| HTTP Examples | $(echo $VALIDATION_DATA | jq -r '.validation_results.has_http_examples | if . then "✅" else "❌" end') |" >> $GITHUB_STEP_SUMMARY
+          echo "| JSON Examples | $(echo $VALIDATION_DATA | jq -r '.validation_results.has_json_examples | if . then "✅" else "❌" end') |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "📈 **Documentation Metrics:**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Lines: $(echo $VALIDATION_DATA | jq -r '.validation_results.line_count')" >> $GITHUB_STEP_SUMMARY
+          echo "- Words: $(echo $VALIDATION_DATA | jq -r '.validation_results.word_count')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$(echo $VALIDATION_DATA | jq -r '.validation_results.validation_passed')" = "true" ]; then
+            echo "🎉 **All validation checks passed!**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Validation failed!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please check the validation report for details." >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ Validation report not found" >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Commit generated documentation
+      if: steps.validation.outputs.validation_passed == 'true' && github.event_name == 'workflow_dispatch'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        if git diff --quiet docs/api/endpoints.md; then
+          echo "No changes to commit"
+        else
+          git add docs/api/endpoints.md
+          git commit -m "docs: auto-generate API documentation [skip ci]"
+          git push
+        fi
+
+  quality-checks:
+    runs-on: ubuntu-latest
+    needs: generate-api-docs
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download validation report
+      uses: actions/download-artifact@v4
+      with:
+        name: api-docs-validation-report
+
+    - name: Run automated quality checks
+      run: |
+        echo "Running quality checks on generated documentation..."
+        
+        # Check if documentation exists
+        if [ ! -f "docs/api/endpoints.md" ]; then
+          echo "❌ Documentation file not found"
+          exit 1
+        fi
+        
+        # Basic quality checks
+        DOC_CONTENT=$(cat docs/api/endpoints.md)
+        
+        # Check for required sections
+        REQUIRED_SECTIONS=("## Overview" "## Authentication" "## Endpoints" "## Request/Response Examples" "## Error Codes")
+        for section in "${REQUIRED_SECTIONS[@]}"; do
+          if ! echo "$DOC_CONTENT" | grep -q "$section"; then
+            echo "❌ Missing required section: $section"
+            exit 1
+          fi
+        done
+        
+        # Check for code examples
+        if ! echo "$DOC_CONTENT" | grep -q "```http"; then
+          echo "❌ Missing HTTP examples"
+          exit 1
+        fi
+        
+        if ! echo "$DOC_CONTENT" | grep -q "```json"; then
+          echo "❌ Missing JSON examples"
+          exit 1
+        fi
+        
+        echo "✅ All quality checks passed!"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: generate-api-docs
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download generated documentation
+      uses: actions/download-artifact@v4
+      with:
+        name: generated-api-docs
+
+    - name: Security scan for sensitive information
+      run: |
+        echo "Scanning documentation for sensitive information..."
+        
+        # Check for potential secrets or sensitive data
+        SENSITIVE_PATTERNS=(
+          "[A-Za-z0-9+/]{40,}="  # Base64-like patterns
+          "[0-9a-f]{32}"         # MD5 hashes
+          "[0-9a-f]{40}"         # SHA-1 hashes
+          "eyJhbGciOiJ"          # JWT tokens
+          "password"
+          "secret"
+          "token"
+          "key"
+        )
+        
+        DOC_CONTENT=$(cat docs/api/endpoints.md)
+        FOUND_SENSITIVE=false
+        
+        for pattern in "${SENSITIVE_PATTERNS[@]}"; do
+          if echo "$DOC_CONTENT" | grep -E "$pattern" | grep -v "example" | grep -v "template" | grep -v "Authorization: Bearer" | grep -q "."; then
+            echo "⚠️  Potential sensitive information found with pattern: $pattern"
+            echo "$DOC_CONTENT" | grep -E "$pattern" | head -5
+            FOUND_SENSITIVE=true
+          fi
+        done
+        
+        if [ "$FOUND_SENSITIVE" = "true" ]; then
+          echo "❌ Potential sensitive information detected in documentation"
+          exit 1
+        else
+          echo "✅ No sensitive information detected"
+        fi
